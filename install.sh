@@ -28,11 +28,13 @@ echo "✓ Installed agm for $ENV_NAME → $TARGET_DIR/agm"
 
 case ":$PATH:" in
     *":$TARGET_DIR:"*)
-        echo "✓ Ready! Run 'agm' to open the interactive menu, or 'agm gui' for desktop GUI."
         ;;
     *)
-        echo "! Note: $TARGET_DIR is not in your PATH."
-        echo "  Add this line to ~/.bashrc or ~/.zshrc:"
+        echo "! Add to ~/.bashrc or ~/.zshrc:"
         echo "    export PATH=\"$TARGET_DIR:\$PATH\""
         ;;
 esac
+
+if [ -t 0 ] && [ -t 1 ]; then
+    exec "$TARGET_DIR/agm"
+fi

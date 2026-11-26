@@ -60,20 +60,20 @@ CLEAR_BELOW = "\033[J"
 HIDE_CURSOR = "\033[?25l"
 SHOW_CURSOR = "\033[?25h"
 
-_PALETTE: Dict[str, Tuple[int, int, int]] = {
-    "O": (251, 146, 60),
-    "Y": (250, 204, 21),
-    "R": (244, 96, 78),
-    "P": (236, 72, 118),
-    "L": (163, 217, 92),
-    "G": (108, 204, 114),
-    "T": (74, 198, 152),
-    "C": (66, 184, 214),
-    "V": (145, 118, 224),
-    "M": (178, 102, 198),
-    "B": (88, 146, 245),
-    "D": (72, 124, 238),
-    "S": (116, 188, 242),
+_PALETTE: Dict[str, int] = {
+    "O": 208,
+    "Y": 220,
+    "R": 203,
+    "P": 204,
+    "L": 154,
+    "G": 83,
+    "T": 49,
+    "C": 45,
+    "V": 141,
+    "M": 171,
+    "B": 39,
+    "D": 33,
+    "S": 75,
 }
 
 _LOGO_GRID = [
@@ -86,7 +86,7 @@ _LOGO_GRID = [
     ".GTC....BB..",
     ".TC......BD.",
     "SS........BD",
-    "............",
+    "SS........BD",
 ]
 
 
@@ -102,16 +102,13 @@ def render_logo_lines() -> List[str]:
             if tc is None and bc is None:
                 parts.append(" ")
             elif tc is not None and bc is None:
-                parts.append(f"\033[38;2;{tc[0]};{tc[1]};{tc[2]}m▀{RESET}")
+                parts.append(f"\033[38;5;{tc}m▀{RESET}")
             elif tc is None and bc is not None:
-                parts.append(f"\033[38;2;{bc[0]};{bc[1]};{bc[2]}m▄{RESET}")
+                parts.append(f"\033[38;5;{bc}m▄{RESET}")
             elif tc == bc:
-                parts.append(f"\033[38;2;{tc[0]};{tc[1]};{tc[2]}m█{RESET}")
+                parts.append(f"\033[38;5;{tc}m█{RESET}")
             else:
-                parts.append(
-                    f"\033[38;2;{tc[0]};{tc[1]};{tc[2]}m"
-                    f"\033[48;2;{bc[0]};{bc[1]};{bc[2]}m▀{RESET}"
-                )
+                parts.append(f"\033[38;5;{tc}m\033[48;5;{bc}m▀{RESET}")
         rows.append("".join(parts))
     return rows
 
@@ -345,7 +342,7 @@ def _quota_detail_lines(prof: Optional[ProfileInfo], width: int) -> List[str]:
     if not grouped:
         return [
             hdr,
-            f"    {SUBTLE}No quota cached yet — select '↻ Refresh quotas & plans'{RESET}",
+            f"    {SUBTLE}No quota cached yet — select '↻ Refresh quota'{RESET}",
             "",
         ]
 
@@ -414,14 +411,14 @@ class AgmTUI:
         items: List[MenuItem] = []
         for p in self.profiles:
             items.append(MenuItem(kind="account", key=p.name, label=p.name, profile=p))
-        items.append(MenuItem(kind="action", key="login", label="+ Login new account"))
-        items.append(MenuItem(kind="action", key="quota", label="↻ Refresh quotas & plans"))
-        items.append(MenuItem(kind="action", key="run_agy", label="▸ Launch agy"))
+        items.append(MenuItem(kind="action", key="login", label="+ Login account"))
+        items.append(MenuItem(kind="action", key="quota", label="↻ Refresh quota"))
         if self.profiles:
-            items.append(MenuItem(kind="action", key="manage", label="✎ Manage accounts"))
+            items.append(MenuItem(kind="action", key="manage", label="✎ Edit accounts"))
+        items.append(MenuItem(kind="action", key="update", label="↑ Check updates"))
+        items.append(MenuItem(kind="action", key="run_agy", label="▸ Launch agy"))
         if has_display():
             items.append(MenuItem(kind="action", key="gui", label="◻ Open GUI"))
-        items.append(MenuItem(kind="action", key="update", label="↑ Check for updates"))
         items.append(MenuItem(kind="action", key="quit", label="× Quit"))
         self.items = items
         self.cursor = max(0, min(self.cursor, len(self.items) - 1))

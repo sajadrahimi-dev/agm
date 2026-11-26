@@ -412,7 +412,7 @@ class AgmTUI:
         items.append(MenuItem(kind="action", key="quota", label="↻ Refresh quotas"))
         if self.profiles:
             items.append(MenuItem(kind="action", key="rename", label="✎ Rename account"))
-            items.append(MenuItem(kind="action", key="delete", label="− Delete account"))
+            items.append(MenuItem(kind="action", key="delete", label="− Remove account"))
         items.append(MenuItem(kind="action", key="update", label="↑ Check updates"))
         items.append(MenuItem(kind="action", key="run_agy", label="▸ Launch agy"))
         if has_display():
@@ -531,28 +531,40 @@ class AgmTUI:
         os.write(sys.stdout.fileno(), frame.encode("utf-8"))
 
     def _pick_account(self, title: str) -> Optional[ProfileInfo]:
-        os.write(sys.stdout.fileno(), (HOME + CLEAR_BELOW + SHOW_CURSOR).encode("utf-8"))
-        print(f"\n  {TITLE_BLUE}{BOLD}{title}{RESET}\n")
-        for i, p in enumerate(self.profiles, start=1):
-            dot = f"{GREEN}●{RESET}" if p.is_active else f"{SUBTLE}○{RESET}"
-            who = p.email or p.name
-            plan_s = f" ({p.plan})" if p.plan else ""
-            print(f"    {WHITE}{i}.{RESET} {dot} {WHITE}{p.name}{RESET}  {MUTED}{who}{plan_s}{RESET}")
-        pick = _prompt_line("Account number (Enter to cancel)")
-        if not pick or not pick.isdigit():
-            self._set_toast("Cancelled.", MUTED)
-            return None
-        idx = int(pick) - 1
-        if not (0 <= idx < len(self.profiles)):
-            self._set_toast("Invalid selection.", YELLOW)
-            return None
-        return self.profiles[idx]
+        idx = 0
+        while True:
+            lines: List[str] = ["", f"  {TITLE_BLUE}{BOLD}{title}{RESET}", ""]
+            for i, p in enumerate(self.profiles):
+                is_sel = i == idx
+                ptr = f"{TITLE_BLUE}❯{RESET}" if is_sel else " "
+                dot = f"{GREEN}●{RESET}" if p.is_active else f"{SUBTLE}○{RESET}"
+                lbl_c = f"{BOLD}{WHITE}" if is_sel else MUTED
+                who = p.email or p.name
+                plan_s = f" ({p.plan})" if p.plan else ""
+                lines.append(f"  {ptr} {dot} {lbl_c}{p.name}{RESET}  {MUTED}{who}{plan_s}{RESET}")
+            lines.append("")
+            lines.append(f"  {SUBTLE}↑↓ move  ·  Enter select  ·  Esc cancel{RESET}")
+            frame = HOME + "\n".join(line + CLEAR_EOL for line in lines) + CLEAR_BELOW
+            os.write(sys.stdout.fileno(), frame.encode("utf-8"))
+
+            key = _read_key()
+            if key in ("q", "Q", "ESC", "CTRL_C"):
+                self._set_toast("Cancelled.", MUTED)
+                return None
+            if key in ("UP", "k", "K"):
+                idx = (idx - 1) % len(self.profiles)
+            elif key in ("DOWN", "j", "J"):
+                idx = (idx + 1) % len(self.profiles)
+            elif key == "ENTER":
+                return self.profiles[idx]
 
     def _rename_account_flow(self) -> None:
         try:
             target = self._pick_account("Rename Account")
             if not target:
                 return
+            os.write(sys.stdout.fileno(), (HOME + CLEAR_BELOW + SHOW_CURSOR).encode("utf-8"))
+            print(f"\n  {TITLE_BLUE}{BOLD}Rename Account{RESET}  {MUTED}({target.email or target.name}){RESET}")
             new_name = _prompt_line("New name", default=target.name)
             if new_name and new_name != target.name:
                 self.store.rename_profile(target.name, new_name)
@@ -567,12 +579,14 @@ class AgmTUI:
 
     def _delete_account_flow(self) -> None:
         try:
-            target = self._pick_account("Delete Account")
+            target = self._pick_account("Remove Account from AGM")
             if not target:
                 return
-            if _confirm(f"Delete '{target.name}'?"):
+            os.write(sys.stdout.fileno(), (HOME + CLEAR_BELOW + SHOW_CURSOR).encode("utf-8"))
+            print(f"\n  {TITLE_BLUE}{BOLD}Remove Account{RESET}  {MUTED}({target.email or target.name}){RESET}")
+            if _confirm(f"Remove '{target.name}' from AGM?"):
                 self.store.remove_profile(target.name)
-                self._set_toast(f"✓ Deleted '{target.name}'", YELLOW)
+                self._set_toast(f"✓ Removed '{target.name}'", YELLOW)
             else:
                 self._set_toast("Cancelled.", MUTED)
         except Exception as exc:

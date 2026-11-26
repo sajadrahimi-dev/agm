@@ -540,7 +540,7 @@ def launch_gui(store: ProfileStore) -> int:
     mk_btn(actions, "↻ Quota", do_refresh_quota, fg=ACCENT).pack(side="left", padx=(0, 6))
     mk_btn(actions, "↻ All", do_refresh_all_quotas, fg=ACCENT).pack(side="left", padx=(0, 6))
     mk_btn(actions, "Edit", do_edit).pack(side="left", padx=(0, 6))
-    mk_btn(actions, "Del", do_delete, fg=RED).pack(side="right")
+    mk_btn(actions, "Remove", do_delete, fg=RED).pack(side="right")
 
     listbox.bind("<<ListboxSelect>>", on_select)
     listbox.bind("<Double-Button-1>", do_switch)

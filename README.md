@@ -28,5 +28,5 @@ agm update          # Update AGM from GitHub
 ## Uninstall
 
 ```bash
-rm -f ~/.local/bin/agm "$PREFIX/bin/agm" && rm -rf ~/.agm
+~/.agm/uninstall.sh
 ```

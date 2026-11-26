@@ -6,12 +6,15 @@ import shutil
 import subprocess
 import sys
 import termios
+import time
 import tty
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from . import __version__
 from .backend import (
+    check_and_update,
     find_agy_binary,
     has_display,
     is_antigravity_gui_running,
@@ -198,14 +201,47 @@ def run_login_flow(
 
     print()
     print(f"  {TITLE_BLUE}{BOLD}Login to a new Antigravity account{RESET}")
-    print(f"  {MUTED}Launching `agy` — complete sign-in, then press Ctrl+D twice (or /exit).{RESET}\n")
+    print(f"  {MUTED}Complete sign-in in browser — AGM will auto-save & close agy immediately.{RESET}\n")
 
+    saved_tty = None
+    if sys.stdin.isatty():
+        try:
+            saved_tty = termios.tcgetattr(sys.stdin.fileno())
+        except Exception:
+            saved_tty = None
+
+    proc = subprocess.Popen([agy_bin])
+    detected_snap = None
     try:
-        subprocess.run([agy_bin], check=False)
+        while proc.poll() is None:
+            time.sleep(0.4)
+            snap = store.backend.read_snapshot()
+            if snap is not None:
+                fp = compute_fingerprint(snap.secret)
+                if not previous_fp or fp != previous_fp:
+                    time.sleep(0.5)
+                    detected_snap = store.backend.read_snapshot() or snap
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=2)
+                    except Exception:
+                        proc.kill()
+                    break
     except KeyboardInterrupt:
-        pass
+        proc.terminate()
+        try:
+            proc.wait(timeout=2)
+        except Exception:
+            proc.kill()
+    finally:
+        if saved_tty is not None:
+            try:
+                termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, saved_tty)
+            except Exception:
+                pass
+        os.write(sys.stdout.fileno(), (ALT_SCREEN_OFF + SHOW_CURSOR + RESET).encode("utf-8"))
 
-    new_snap = store.backend.read_snapshot()
+    new_snap = detected_snap or store.backend.read_snapshot()
     if new_snap is None:
         if previous_snap is not None:
             store.backend.write_snapshot(previous_snap)
@@ -217,27 +253,16 @@ def run_login_flow(
         return "Same account detected — no new login was completed."
 
     detected_email = email.strip() or try_extract_email(new_snap.secret)
-    suggested = name.strip() or suggest_profile_name(detected_email)
-
-    if detected_email:
-        print(f"\n  {GREEN}✓{RESET} Detected email: {WHITE}{BOLD}{detected_email}{RESET}")
-
-    final_name = suggested
-    final_note = note.strip()
-    if interactive_name and not name.strip():
-        chosen = _prompt_line("Account name", default=suggested)
-        if chosen:
-            final_name = chosen
-
-    final_name = validate_name(final_name)
+    final_name = validate_name(name.strip() or suggest_profile_name(detected_email))
     prof = store.save_current(
         final_name,
         email=detected_email,
-        note=final_note,
+        note=note.strip(),
         overwrite=True,
     )
 
     if fetch_quota:
+        print(f"\n  {GREEN}✓{RESET} Logged in as {WHITE}{BOLD}{prof.email or prof.name}{RESET}")
         print(f"  {MUTED}Fetching usage quota & plan...{RESET}")
         try:
             store.refresh_active_quota()
@@ -245,7 +270,7 @@ def run_login_flow(
             pass
 
     email_str = f" ({prof.email})" if prof.email else ""
-    return f"Logged in & saved '{prof.name}'{email_str}"
+    return f"Saved '{prof.name}'{email_str}"
 
 
 def _plan_badge_colored(plan: str) -> str:
@@ -367,6 +392,7 @@ class AgmTUI:
         self.toast_color = GREEN
         self.launch_agy_after = False
         self.launch_gui_after = False
+        self.restart_self_after = False
 
         self.live_fp: Optional[str] = None
         self.live_email: str = ""
@@ -395,6 +421,7 @@ class AgmTUI:
             items.append(MenuItem(kind="action", key="manage", label="✎ Manage accounts"))
         if has_display():
             items.append(MenuItem(kind="action", key="gui", label="◻ Open GUI"))
+        items.append(MenuItem(kind="action", key="update", label="↑ Check for updates"))
         items.append(MenuItem(kind="action", key="quit", label="× Quit"))
         self.items = items
         self.cursor = max(0, min(self.cursor, len(self.items) - 1))
@@ -635,11 +662,29 @@ class AgmTUI:
                         self.launch_gui_after = True
                         break
 
+                    elif cur.key == "update":
+                        self._set_toast("Checking GitHub for updates...", CYAN)
+                        self._render()
+                        updated, msg = check_and_update()
+                        if updated:
+                            self._set_toast(f"✓ {msg} — restarting...", GREEN)
+                            self._render()
+                            time.sleep(0.6)
+                            self.restart_self_after = True
+                            break
+                        else:
+                            col = GREEN if "up to date" in msg.lower() else YELLOW
+                            self._set_toast(msg, col)
+
                     elif cur.key == "quit":
                         break
 
         finally:
             os.write(sys.stdout.fileno(), (SHOW_CURSOR + ALT_SCREEN_OFF + RESET).encode("utf-8"))
+
+        if self.restart_self_after:
+            agm_entry = str(Path(__file__).resolve().parent.parent / "agm")
+            os.execv(sys.executable, [sys.executable, agm_entry])
 
         if self.launch_agy_after:
             agy_bin = find_agy_binary()

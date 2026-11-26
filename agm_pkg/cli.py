@@ -7,6 +7,7 @@ from typing import List, Optional
 
 from . import __version__
 from .backend import (
+    check_and_update,
     find_agy_binary,
     get_backend,
     has_display,
@@ -274,6 +275,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("ls", aliases=["list"], help="List saved accounts & cached quotas")
     sub.add_parser("status", help="Show currently active account & email")
     sub.add_parser("doctor", help="Check environment, backend, and agy installation")
+    sub.add_parser("update", help="Check GitHub and update agm")
     sub.add_parser("logout", help="Clear active login (keeps saved profiles)")
 
     p_save = sub.add_parser(
@@ -354,6 +356,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_logout(store)
     if args.command == "doctor":
         return cmd_doctor(store)
+    if args.command == "update":
+        updated, msg = check_and_update()
+        if updated or "up to date" in msg.lower():
+            _ok(msg)
+            return 0
+        _err(msg)
+        return 1
 
     parser.print_help()
     return 0

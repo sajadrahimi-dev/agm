@@ -343,3 +343,52 @@ def get_backend(force: Optional[str] = None) -> CredentialBackend:
         if backend.is_available():
             return backend
     return FileFallbackBackend()
+
+
+def check_and_update() -> tuple[bool, str]:
+    repo_dir = Path(__file__).resolve().parent.parent
+    if not (repo_dir / ".git").exists():
+        return False, "Not a git installation — clone from GitHub to enable updates."
+    if not shutil.which("git"):
+        return False, "git is not installed."
+
+    fetch = subprocess.run(
+        ["git", "-C", str(repo_dir), "fetch", "origin", "main", "--quiet"],
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+    if fetch.returncode != 0:
+        err = (fetch.stderr or "").strip() or "Failed to reach GitHub."
+        return False, err
+
+    local = subprocess.run(
+        ["git", "-C", str(repo_dir), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=False,
+    ).stdout.strip()
+    remote = subprocess.run(
+        ["git", "-C", str(repo_dir), "rev-parse", "origin/main"],
+        capture_output=True,
+        text=True,
+        check=False,
+    ).stdout.strip()
+
+    if not remote or local == remote:
+        return False, "Already up to date."
+
+    pull = subprocess.run(
+        ["git", "-C", str(repo_dir), "pull", "--ff-only", "origin", "main"],
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+    if pull.returncode != 0:
+        err = (pull.stderr or pull.stdout or "").strip() or "Update failed."
+        return False, err
+
+    short_sha = remote[:7]
+    return True, f"Updated to latest ({short_sha})"

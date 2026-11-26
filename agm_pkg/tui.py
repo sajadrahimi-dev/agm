@@ -387,6 +387,7 @@ class AgmTUI:
         self.toast_color = GREEN
         self.launch_agy_after = False
         self.restart_self_after = False
+        self.uninstall_after = False
 
         self.live_fp: Optional[str] = None
         self.live_email: str = ""
@@ -414,6 +415,7 @@ class AgmTUI:
             items.append(MenuItem(kind="action", key="rename", label="✎ Rename account"))
             items.append(MenuItem(kind="action", key="delete", label="− Remove account"))
         items.append(MenuItem(kind="action", key="update", label="↑ Check updates"))
+        items.append(MenuItem(kind="action", key="uninstall", label="✕ Uninstall AGM"))
         items.append(MenuItem(kind="action", key="run_agy", label="▸ Launch agy"))
         if has_display():
             items.append(MenuItem(kind="action", key="gui", label="◻ Open GUI"))
@@ -605,6 +607,18 @@ class AgmTUI:
 
         os.write(sys.stdout.fileno(), (ALT_SCREEN_ON + HIDE_CURSOR).encode("utf-8"))
         try:
+            if self.active_prof and (not self.active_prof.quota or not self.active_prof.plan):
+                self._set_toast(
+                    f"Syncing quota & plan for {self.active_prof.name}...", CYAN
+                )
+                self._render()
+                try:
+                    self.store.refresh_active_quota()
+                    self._reload_state()
+                    self._set_toast("✓ Quota & plan synced", GREEN)
+                except Exception:
+                    self._set_toast("", MUTED)
+
             while True:
                 self._render()
                 key = _read_key()
@@ -719,11 +733,35 @@ class AgmTUI:
                             col = GREEN if "up to date" in msg.lower() else YELLOW
                             self._set_toast(msg, col)
 
+                    elif cur.key == "uninstall":
+                        os.write(sys.stdout.fileno(), (HOME + CLEAR_BELOW + SHOW_CURSOR).encode("utf-8"))
+                        print(f"\n  {RED}{BOLD}Uninstall AGM{RESET}")
+                        if _confirm("Uninstall AGM from this system?"):
+                            self.uninstall_after = True
+                            break
+                        os.write(sys.stdout.fileno(), (HOME + CLEAR_BELOW + HIDE_CURSOR).encode("utf-8"))
+                        self._set_toast("Cancelled.", MUTED)
+
                     elif cur.key == "quit":
                         break
 
         finally:
             os.write(sys.stdout.fileno(), (SHOW_CURSOR + ALT_SCREEN_OFF + RESET).encode("utf-8"))
+
+        if self.uninstall_after:
+            uninst = Path(__file__).resolve().parent.parent / "uninstall.sh"
+            if uninst.is_file():
+                subprocess.run(["bash", str(uninst)], check=False)
+            else:
+                target_bin = (
+                    Path(os.environ.get("PREFIX", "/data/data/com.termux/files/usr")) / "bin" / "agm"
+                    if is_termux()
+                    else Path.home() / ".local" / "bin" / "agm"
+                )
+                if target_bin.is_symlink() or target_bin.is_file():
+                    target_bin.unlink()
+                print("✓ AGM uninstalled.")
+            return 0
 
         if self.restart_self_after:
             agm_entry = str(Path(__file__).resolve().parent.parent / "agm")

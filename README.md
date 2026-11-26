@@ -1,17 +1,21 @@
 # AGM
 
+![Linux](https://img.shields.io/badge/Linux-FCC624?style=flat-square&logo=linux&logoColor=black)
+![Termux](https://img.shields.io/badge/Termux-000000?style=flat-square&logo=android&logoColor=3DDC84)
+![Python](https://img.shields.io/badge/Python-3.8+-3776AB?style=flat-square&logo=python&logoColor=white)
+
 Fast, lightweight account switcher & quota viewer for **Antigravity (`agy` CLI & GUI)** on **Linux** and **Termux**.
 
-![AGM Preview](HOME.jpg)
+![AGM Preview](home.jpg)
 
 ## Install
 
-**Linux**
+**🐧 Linux**
 ```bash
 git clone https://github.com/sajadrahimi-dev/agm.git ~/.agm && ~/.agm/install.sh
 ```
 
-**Termux**
+**📱 Termux**
 
 1. Install dependencies (if not installed):
 ```bash

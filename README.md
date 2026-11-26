@@ -10,8 +10,15 @@ git clone https://github.com/sajadrahimi-dev/agm.git ~/.agm && ~/.agm/install.sh
 ```
 
 **Termux**
+
+1. Install dependencies (if not installed):
 ```bash
-pkg install -y git python && git clone https://github.com/sajadrahimi-dev/agm.git ~/.agm && ~/.agm/install.sh
+pkg install -y git python
+```
+
+2. Clone & run:
+```bash
+git clone https://github.com/sajadrahimi-dev/agm.git ~/.agm && ~/.agm/install.sh
 ```
 
 ## Usage

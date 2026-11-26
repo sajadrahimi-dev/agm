@@ -285,9 +285,9 @@ class FileFallbackBackend(CredentialBackend):
             self.path = Path(env_path).expanduser()
         else:
             candidates = [
+                Path.home() / ".gemini" / "antigravity-cli" / "antigravity-oauth-token",
+                Path.home() / ".gemini" / "antigravity" / "antigravity-oauth-token",
                 Path.home() / ".config" / "antigravity" / "credentials",
-                Path.home() / ".config" / "antigravity" / "credentials.json",
-                Path.home() / ".gemini" / "antigravity-cli" / "credentials.json",
             ]
             chosen = candidates[0]
             for c in candidates:

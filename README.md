@@ -2,6 +2,8 @@
 
 Fast, lightweight account switcher & quota viewer for **Antigravity (`agy` CLI & GUI)** on **Linux** and **Termux**.
 
+![AGM Preview](HOME.jpg)
+
 ## Install
 
 **Linux**

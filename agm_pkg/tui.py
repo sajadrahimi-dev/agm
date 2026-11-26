@@ -77,16 +77,14 @@ _PALETTE: Dict[str, int] = {
 }
 
 _LOGO_GRID = [
-    ".....OO.....",
-    "....YOOR....",
-    "...LYOORR...",
-    "...GGOORR...",
-    "..GGTCVVPP..",
-    "..GTCB..VM..",
-    ".GTC....BB..",
-    ".TC......BD.",
-    "SS........BD",
-    "SS........BD",
+    "....OO....",
+    "...YOOR...",
+    "..LYOORR..",
+    "..GGTVPP..",
+    ".GGCB.VM..",
+    ".GTC...BD.",
+    "SS......BD",
+    "SS......BD",
 ]
 
 
@@ -388,7 +386,6 @@ class AgmTUI:
         self.toast = ""
         self.toast_color = GREEN
         self.launch_agy_after = False
-        self.launch_gui_after = False
         self.restart_self_after = False
 
         self.live_fp: Optional[str] = None
@@ -411,10 +408,11 @@ class AgmTUI:
         items: List[MenuItem] = []
         for p in self.profiles:
             items.append(MenuItem(kind="account", key=p.name, label=p.name, profile=p))
-        items.append(MenuItem(kind="action", key="login", label="+ Login account"))
-        items.append(MenuItem(kind="action", key="quota", label="↻ Refresh quota"))
+        items.append(MenuItem(kind="action", key="login", label="+ Add new account"))
+        items.append(MenuItem(kind="action", key="quota", label="↻ Refresh quotas"))
         if self.profiles:
-            items.append(MenuItem(kind="action", key="manage", label="✎ Edit accounts"))
+            items.append(MenuItem(kind="action", key="rename", label="✎ Rename account"))
+            items.append(MenuItem(kind="action", key="delete", label="− Delete account"))
         items.append(MenuItem(kind="action", key="update", label="↑ Check updates"))
         items.append(MenuItem(kind="action", key="run_agy", label="▸ Launch agy"))
         if has_display():
@@ -443,8 +441,9 @@ class AgmTUI:
             pass
 
     def _render(self) -> None:
-        w = _term_width()
-        lines: List[str] = [""]
+        term = shutil.get_terminal_size(fallback=(84, 24))
+        w = max(44, term.columns)
+        h = max(16, term.lines)
 
         env_str = "Termux" if is_termux() else "Linux"
         backend_short = self.store.backend.name.split(" ")[0]
@@ -454,25 +453,24 @@ class AgmTUI:
         if self.active_prof:
             who = self.active_prof.email or self.active_prof.name
             plan_tail = f" ({self.active_prof.plan})" if self.active_prof.plan else ""
-            h2 = f"{WHITE}{_trunc(who, w - 36)}{RESET}{MUTED}{plan_tail}{RESET}"
+            h2 = f"{WHITE}{_trunc(who, w - 34)}{RESET}{MUTED}{plan_tail}{RESET}"
         elif self.live_email:
-            h2 = f"{WHITE}{_trunc(self.live_email, w - 22)}{RESET}"
+            h2 = f"{WHITE}{_trunc(self.live_email, w - 20)}{RESET}"
         else:
             h2 = f"{YELLOW}Not logged in{RESET}"
         h3 = f"{MUTED}{env_str} ({backend_short}) · CLI & GUI{gui_note}{RESET}"
         h4 = f"{SUBTLE}{len(self.profiles)} account{'s' if len(self.profiles) != 1 else ''} saved{RESET}"
 
-        info_rows = [h1, h2, h3, h4, ""]
-        for i in range(5):
-            lines.append(f"  {self.logo[i]}    {info_rows[i]}")
+        header_rows = [
+            f"  {self.logo[i]}    {info}"
+            for i, info in enumerate((h1, h2, h3, h4))
+        ]
 
-        lines.append("")
-
+        acct_rows: List[str] = []
         if self.profiles:
-            lines.append(f"  {SUBTLE}Accounts{RESET}")
+            acct_rows.append(f"  {SUBTLE}Accounts{RESET}")
             right_reserve = 35 if w >= 68 else 20
             label_col_w = max(18, min(32, w - right_reserve - 6))
-
             for idx, item in enumerate(self.items):
                 if item.kind != "account" or item.profile is None:
                     continue
@@ -481,74 +479,100 @@ class AgmTUI:
                 ptr = f"{TITLE_BLUE}❯{RESET}" if is_sel else " "
                 dot = f"{GREEN}●{RESET}" if p.is_active else f"{SUBTLE}○{RESET}"
                 lbl_c = f"{BOLD}{WHITE}" if is_sel else (WHITE if p.is_active else MUTED)
-
                 if p.email:
                     prefix = suggest_profile_name(p.email)
                     display_lbl = p.email if p.name == prefix else f"{p.name} ({p.email})"
                 else:
                     display_lbl = p.name
-
                 padded_lbl = _trunc(display_lbl, label_col_w).ljust(label_col_w)
                 plan_col = _plan_badge_colored(p.plan)
                 q_col = _row_quota_summary(p.quota, w)
-                lines.append(f"  {ptr} {dot} {lbl_c}{padded_lbl}{RESET}  {plan_col}  {q_col}")
-            lines.append("")
+                acct_rows.append(f"  {ptr} {dot} {lbl_c}{padded_lbl}{RESET}  {plan_col}  {q_col}")
 
-        lines.append(f"  {SUBTLE}Actions{RESET}")
+        action_rows: List[str] = [f"  {SUBTLE}Actions{RESET}"]
         for idx, item in enumerate(self.items):
             if item.kind != "action":
                 continue
             is_sel = idx == self.cursor
             ptr = f"{TITLE_BLUE}❯{RESET}" if is_sel else " "
             lbl_c = f"{BOLD}{WHITE}" if is_sel else MUTED
-            lines.append(f"  {ptr} {lbl_c}{item.label}{RESET}")
+            action_rows.append(f"  {ptr} {lbl_c}{item.label}{RESET}")
 
-        lines.append("")
         cur = self.items[self.cursor]
         focus_prof = cur.profile if (cur.kind == "account" and cur.profile) else self.active_prof
-        lines.extend(_quota_detail_lines(focus_prof, w))
+        quota_rows = _quota_detail_lines(focus_prof, w)
 
-        lines.append("")
         if self.toast:
-            lines.append(f"  {self.toast_color}{_trunc(self.toast, w - 4)}{RESET}")
+            footer_row = f"  {self.toast_color}{_trunc(self.toast, w - 4)}{RESET}"
         else:
-            lines.append("")
-        lines.append(f"  {SUBTLE}↑↓ move  ·  Enter select  ·  r run agy  ·  q quit{RESET}")
+            footer_row = f"  {SUBTLE}↑↓ move  ·  Enter select  ·  r run agy  ·  q quit{RESET}"
 
-        frame = HOME + "\n".join(line + CLEAR_EOL for line in lines) + "\n" + CLEAR_BELOW
+        spacious = len(header_rows) + len(acct_rows) + len(action_rows) + len(quota_rows) + 4 <= h
+        lines: List[str] = []
+        lines.extend(header_rows)
+        if spacious:
+            lines.append("")
+        if acct_rows:
+            lines.extend(acct_rows)
+            if spacious:
+                lines.append("")
+        lines.extend(action_rows)
+        if spacious:
+            lines.append("")
+        lines.extend(quota_rows)
+        if len(lines) + 2 <= h:
+            lines.append("")
+        lines.append(footer_row)
+
+        if len(lines) > h:
+            lines = lines[:h]
+
+        frame = HOME + "\n".join(line + CLEAR_EOL for line in lines) + CLEAR_BELOW
         os.write(sys.stdout.fileno(), frame.encode("utf-8"))
 
-    def _manage_account_flow(self) -> None:
+    def _pick_account(self, title: str) -> Optional[ProfileInfo]:
         os.write(sys.stdout.fileno(), (HOME + CLEAR_BELOW + SHOW_CURSOR).encode("utf-8"))
+        print(f"\n  {TITLE_BLUE}{BOLD}{title}{RESET}\n")
+        for i, p in enumerate(self.profiles, start=1):
+            dot = f"{GREEN}●{RESET}" if p.is_active else f"{SUBTLE}○{RESET}"
+            who = p.email or p.name
+            plan_s = f" ({p.plan})" if p.plan else ""
+            print(f"    {WHITE}{i}.{RESET} {dot} {WHITE}{p.name}{RESET}  {MUTED}{who}{plan_s}{RESET}")
+        pick = _prompt_line("Account number (Enter to cancel)")
+        if not pick or not pick.isdigit():
+            self._set_toast("Cancelled.", MUTED)
+            return None
+        idx = int(pick) - 1
+        if not (0 <= idx < len(self.profiles)):
+            self._set_toast("Invalid selection.", YELLOW)
+            return None
+        return self.profiles[idx]
+
+    def _rename_account_flow(self) -> None:
         try:
-            print(f"\n  {TITLE_BLUE}{BOLD}Manage Accounts{RESET}\n")
-            for i, p in enumerate(self.profiles, start=1):
-                dot = f"{GREEN}●{RESET}" if p.is_active else f"{SUBTLE}○{RESET}"
-                who = p.email or p.name
-                plan_s = f" ({p.plan})" if p.plan else ""
-                print(f"    {WHITE}{i}.{RESET} {dot} {WHITE}{p.name}{RESET}  {MUTED}{who}{plan_s}{RESET}")
-            pick = _prompt_line("Account number (Enter to cancel)")
-            if not pick or not pick.isdigit():
+            target = self._pick_account("Rename Account")
+            if not target:
+                return
+            new_name = _prompt_line("New name", default=target.name)
+            if new_name and new_name != target.name:
+                self.store.rename_profile(target.name, new_name)
+                self._set_toast(f"✓ Renamed '{target.name}' → '{new_name}'", GREEN)
+            else:
                 self._set_toast("Cancelled.", MUTED)
+        except Exception as exc:
+            self._set_toast(f"✗ {exc}", RED)
+        finally:
+            os.write(sys.stdout.fileno(), (HOME + CLEAR_BELOW + HIDE_CURSOR).encode("utf-8"))
+            self._reload_state()
+
+    def _delete_account_flow(self) -> None:
+        try:
+            target = self._pick_account("Delete Account")
+            if not target:
                 return
-            idx = int(pick) - 1
-            if not (0 <= idx < len(self.profiles)):
-                self._set_toast("Invalid selection.", YELLOW)
-                return
-            target = self.profiles[idx]
-            act = _prompt_line(f"For '{target.name}' — [r]ename or [d]elete")
-            if not act:
-                self._set_toast("Cancelled.", MUTED)
-                return
-            if act.lower().startswith("r"):
-                new_name = _prompt_line("New name", default=target.name)
-                if new_name and new_name != target.name:
-                    self.store.rename_profile(target.name, new_name)
-                    self._set_toast(f"✓ Renamed '{target.name}' → '{new_name}'", GREEN)
-            elif act.lower().startswith("d"):
-                if _confirm(f"Delete '{target.name}'?"):
-                    self.store.remove_profile(target.name)
-                    self._set_toast(f"✓ Deleted '{target.name}'", YELLOW)
+            if _confirm(f"Delete '{target.name}'?"):
+                self.store.remove_profile(target.name)
+                self._set_toast(f"✓ Deleted '{target.name}'", YELLOW)
             else:
                 self._set_toast("Cancelled.", MUTED)
         except Exception as exc:
@@ -648,16 +672,24 @@ class AgmTUI:
                             except Exception as exc:
                                 self._set_toast(f"✗ {exc}", RED)
 
+                    elif cur.key == "rename":
+                        self._rename_account_flow()
+
+                    elif cur.key == "delete":
+                        self._delete_account_flow()
+
                     elif cur.key == "run_agy":
                         self.launch_agy_after = True
                         break
 
-                    elif cur.key == "manage":
-                        self._manage_account_flow()
-
                     elif cur.key == "gui":
-                        self.launch_gui_after = True
-                        break
+                        self._set_toast("GUI open — close window to return here", CYAN)
+                        self._render()
+                        from .gui import launch_gui
+
+                        launch_gui(self.store)
+                        self._reload_state()
+                        self._set_toast("Returned from GUI", MUTED)
 
                     elif cur.key == "update":
                         self._set_toast("Checking GitHub for updates...", CYAN)
@@ -690,10 +722,5 @@ class AgmTUI:
             else:
                 print("Error: `agy` binary not found in PATH.")
                 return 1
-
-        if self.launch_gui_after:
-            from .gui import launch_gui
-
-            return launch_gui(self.store)
 
         return 0

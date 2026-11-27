@@ -402,7 +402,9 @@ class AgmTUI:
 
     def _reload_state(self) -> None:
         self.live_fp, self.live_email = self.store.get_live_info()
-        self.profiles = self.store.list_profiles(live_fp=self.live_fp)
+        self.profiles = self.store.list_profiles(
+            live_fp=self.live_fp, live_email=self.live_email
+        )
         self.active_prof = next((p for p in self.profiles if p.is_active), None)
         self.gui_running = is_antigravity_gui_running()
 
@@ -424,11 +426,11 @@ class AgmTUI:
         self.cursor = max(0, min(self.cursor, len(self.items) - 1))
 
     def _auto_save_live_if_needed(self) -> None:
+        self.store.deduplicate_by_email()
+        if self.store.sync_live_token_if_matched() is not None:
+            return
         live_fp, live_email = self.store.get_live_info()
         if not live_fp:
-            return
-        profiles = self.store.list_profiles(live_fp=live_fp)
-        if any(p.is_active for p in profiles):
             return
         base_name = suggest_profile_name(live_email, fallback="default")
         candidate = base_name
@@ -507,7 +509,7 @@ class AgmTUI:
         if self.toast:
             footer_row = f"  {self.toast_color}{_trunc(self.toast, w - 4)}{RESET}"
         else:
-            footer_row = f"  {SUBTLE}↑↓ move  ·  Enter select  ·  r run agy  ·  q quit{RESET}"
+            footer_row = f"  {SUBTLE}↑↓ move  ·  Enter launch agy  ·  s switch  ·  q quit{RESET}"
 
         spacious = len(header_rows) + len(acct_rows) + len(action_rows) + len(quota_rows) + 4 <= h
         lines: List[str] = []
@@ -634,13 +636,14 @@ class AgmTUI:
                     self.toast = ""
                     self.cursor = (self.cursor + 1) % len(self.items)
 
-                elif key in ("r", "R"):
+                elif key in ("s", "S"):
                     cur = self.items[self.cursor]
                     if cur.kind == "account" and cur.profile:
                         try:
                             self.store.switch_to(cur.profile.name)
-                            self.launch_agy_after = True
-                            break
+                            self._reload_state()
+                            hint = " (restart GUI to apply)" if self.gui_running else ""
+                            self._set_toast(f"✓ Switched to {cur.profile.name}{hint}", GREEN)
                         except Exception as exc:
                             self._set_toast(f"✗ {exc}", RED)
 
@@ -650,9 +653,8 @@ class AgmTUI:
                     if cur.kind == "account" and cur.profile:
                         try:
                             self.store.switch_to(cur.profile.name)
-                            self._reload_state()
-                            hint = " (restart GUI to apply)" if self.gui_running else ""
-                            self._set_toast(f"✓ Switched to {cur.profile.name}{hint}", GREEN)
+                            self.launch_agy_after = True
+                            break
                         except Exception as exc:
                             self._set_toast(f"✗ {exc}", RED)
 

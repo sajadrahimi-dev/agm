@@ -140,17 +140,103 @@ class ProfileStore:
         return email
 
     def get_active_status(self) -> Tuple[bool, Optional[str], Optional[str]]:
-        live_fp, _ = self.get_live_info()
+        live_fp, live_email = self.get_live_info()
         if not live_fp:
             return False, None, None
-        for prof in self.list_profiles(live_fp=live_fp):
+        for prof in self.list_profiles(live_fp=live_fp, live_email=live_email):
             if prof.is_active:
                 return True, prof.name, live_fp
         return True, None, live_fp
 
-    def list_profiles(self, live_fp: Optional[str] = None) -> List[ProfileInfo]:
+    def find_by_email(self, email: str) -> Optional[str]:
+        target = email.strip().lower()
+        if not target:
+            return None
+        for path in sorted(self.profiles_dir.glob("*.json")):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                p_email = (data.get("email") or "").strip().lower()
+                if not p_email and data.get("secret"):
+                    p_email = try_extract_email(data["secret"]).lower()
+                if p_email == target:
+                    return data.get("name", path.stem)
+            except Exception:
+                continue
+        return None
+
+    def sync_live_token_if_matched(self) -> Optional[str]:
+        snap = self.backend.read_snapshot()
+        if snap is None:
+            return None
+        live_fp = compute_fingerprint(snap.secret)
+        live_email = try_extract_email(snap.secret).lower()
+        for path in sorted(self.profiles_dir.glob("*.json")):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                fp = data.get("fingerprint", "")
+                p_email = (data.get("email") or "").strip().lower()
+                if not p_email and data.get("secret"):
+                    p_email = try_extract_email(data["secret"]).lower()
+                if (live_email and p_email == live_email) or (live_fp and fp == live_fp):
+                    if fp != live_fp or (live_email and not data.get("email")):
+                        data["secret"] = snap.secret
+                        data["fingerprint"] = live_fp
+                        data["user_scope"] = snap.user_scope
+                        if live_email and not data.get("email"):
+                            data["email"] = live_email
+                        data["last_used_at"] = now_iso()
+                        self._write_json_secure(path, data)
+                    return data.get("name", path.stem)
+            except Exception:
+                continue
+        return None
+
+    def deduplicate_by_email(self) -> int:
+        by_email: Dict[str, List[Tuple[Path, dict]]] = {}
+        for path in sorted(self.profiles_dir.glob("*.json")):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                p_email = (data.get("email") or "").strip().lower()
+                if not p_email and data.get("secret"):
+                    p_email = try_extract_email(data["secret"]).lower()
+                if p_email:
+                    by_email.setdefault(p_email, []).append((path, data))
+            except Exception:
+                continue
+
+        removed = 0
+        for entries in by_email.values():
+            if len(entries) <= 1:
+                continue
+            entries.sort(key=lambda pair: (len(pair[0].stem), pair[0].stem.lower()))
+            keep_path, keep_data = entries[0]
+            freshest = max(entries, key=lambda pair: pair[1].get("last_used_at", ""))[1]
+            if freshest.get("secret"):
+                keep_data["secret"] = freshest["secret"]
+                keep_data["fingerprint"] = freshest.get("fingerprint", keep_data.get("fingerprint", ""))
+                keep_data["user_scope"] = freshest.get("user_scope", keep_data.get("user_scope"))
+            if not keep_data.get("quota") and freshest.get("quota"):
+                keep_data["quota"] = freshest["quota"]
+            if not keep_data.get("plan") and freshest.get("plan"):
+                keep_data["plan"] = freshest["plan"]
+            keep_data["last_used_at"] = freshest.get("last_used_at", keep_data.get("last_used_at", ""))
+            self._write_json_secure(keep_path, keep_data)
+            for dup_path, _ in entries[1:]:
+                try:
+                    dup_path.unlink()
+                    removed += 1
+                except OSError:
+                    pass
+        return removed
+
+    def list_profiles(
+        self,
+        live_fp: Optional[str] = None,
+        live_email: Optional[str] = None,
+    ) -> List[ProfileInfo]:
         if live_fp is None:
-            live_fp = self.get_live_fingerprint()
+            live_fp, live_email = self.get_live_info()
+        live_email_low = (live_email or "").strip().lower()
 
         profiles: List[ProfileInfo] = []
         for path in sorted(self.profiles_dir.glob("*.json")):
@@ -160,6 +246,8 @@ class ProfileStore:
                 email = data.get("email", "")
                 if not email and data.get("secret"):
                     email = try_extract_email(data["secret"])
+                email_match = bool(live_email_low and email and email.lower() == live_email_low)
+                fp_match = bool(live_fp and fp == live_fp)
                 profiles.append(
                     ProfileInfo(
                         name=data.get("name", path.stem),
@@ -168,7 +256,7 @@ class ProfileStore:
                         fingerprint=fp,
                         created_at=data.get("created_at", ""),
                         last_used_at=data.get("last_used_at", ""),
-                        is_active=bool(live_fp and fp == live_fp),
+                        is_active=email_match or fp_match,
                         quota=data.get("quota"),
                         plan=data.get("plan", ""),
                     )
@@ -194,8 +282,13 @@ class ProfileStore:
             )
 
         detected_email = email.strip() or try_extract_email(snap.secret)
-        raw_name = name.strip() or suggest_profile_name(detected_email)
-        clean_name = validate_name(raw_name)
+        existing_for_email = self.find_by_email(detected_email) if detected_email else None
+        if not name.strip() and existing_for_email:
+            clean_name = existing_for_email
+            overwrite = True
+        else:
+            raw_name = name.strip() or suggest_profile_name(detected_email)
+            clean_name = validate_name(raw_name)
         path = self._profile_path(clean_name)
         if path.exists() and not overwrite:
             raise FileExistsError(

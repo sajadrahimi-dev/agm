@@ -50,7 +50,7 @@ class QuotaEntry:
 
     def reset_human(self) -> str:
         if not self.reset_at or self.reset_at.startswith("1970-01-01"):
-            return ""
+            return "full" if self.remaining_pct >= 100 else ""
         try:
             dt = datetime.fromisoformat(self.reset_at.replace("Z", "+00:00"))
             now = datetime.now(timezone.utc)
